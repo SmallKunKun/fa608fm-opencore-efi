@@ -1,0 +1,117 @@
+name: Release EFI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release 版本号，例如 v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="$REF_NAME"
+          fi
+
+          case "$VERSION" in
+            v*) ;;
+            *) VERSION="v$VERSION" ;;
+          esac
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset=FA608F-OpenCore-EFI-${VERSION}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Validate config
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          import sys
+          from pathlib import Path
+
+          config = Path("EFI/OC/config.plist")
+          if not config.is_file():
+              sys.exit("EFI/OC/config.plist 不存在")
+
+          with config.open("rb") as f:
+              data = plistlib.load(f)
+
+          def is_blank(value):
+              if value is None:
+                  return True
+              if isinstance(value, (bytes, bytearray)):
+                  return not any(value)
+              if isinstance(value, str):
+                  return not value.strip()
+              return not value
+
+          generic = data.get("PlatformInfo", {}).get("Generic", {})
+          sensitive = ("SystemSerialNumber", "MLB", "SystemUUID", "ROM")
+          leaked = [key for key in sensitive if not is_blank(generic.get(key))]
+
+          if leaked:
+              sys.exit("发布副本包含机器身份字段：" + ", ".join(leaked))
+
+          print("配置校验通过：SMBIOS 身份字段为空")
+          PY
+
+      - name: Package EFI
+        env:
+          ASSET: ${{ steps.version.outputs.asset }}
+        run: |
+          zip -rq -X "$ASSET" EFI
+          test -s "$ASSET"
+          echo "已生成 $ASSET"
+          unzip -l "$ASSET" | sed -n '1,10p'
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSET: ${{ steps.version.outputs.asset }}
+          TITLE: FA608F OpenCore EFI ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION 已存在，更新说明和附件"
+            gh release edit "$VERSION" --title "$TITLE" --notes-file .github/RELEASE_NOTES.md
+            gh release upload "$VERSION" "$ASSET" --clobber
+            exit 0
+          fi
+
+          TARGET_ARGS=()
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TARGET_ARGS=(--target "$GITHUB_SHA")
+          fi
+
+          gh release create "$VERSION" "$ASSET" \
+            --title "$TITLE" \
+            --notes-file .github/RELEASE_NOTES.md \
+            "${TARGET_ARGS[@]}"
