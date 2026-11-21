@@ -47,7 +47,7 @@ jobs:
           esac
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "asset=FA608F-OpenCore-EFI-${VERSION}.zip" >> "$GITHUB_OUTPUT"
+          echo "asset=FA608FM-OpenCore-EFI-${VERSION}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Validate config
         run: |
@@ -97,11 +97,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           VERSION: ${{ steps.version.outputs.version }}
           ASSET: ${{ steps.version.outputs.asset }}
-          TITLE: FA608F OpenCore EFI ${{ steps.version.outputs.version }}
+          TITLE: FA608FM OpenCore EFI ${{ steps.version.outputs.version }}
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION 已存在，更新说明和附件"
             gh release edit "$VERSION" --title "$TITLE" --notes-file .github/RELEASE_NOTES.md
+
+            gh release view "$VERSION" --json assets --jq '.assets[].name' \
+              | while IFS= read -r name; do
+                  case "$name" in
+                    FA608F-OpenCore-EFI-*.zip)
+                      echo "删除旧命名附件 $name"
+                      gh release delete-asset "$VERSION" "$name" --yes
+                      ;;
+                  esac
+                done
+
             gh release upload "$VERSION" "$ASSET" --clobber
             exit 0
           fi

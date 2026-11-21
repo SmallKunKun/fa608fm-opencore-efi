@@ -1,6 +1,6 @@
 ## 下载
 
-- `FA608F-OpenCore-EFI-v*.*.*.zip`：解压后第一层为 `EFI/`，可直接复制到 U 盘的 EFI 分区。
+- `FA608FM-OpenCore-EFI-v*.*.*.zip`：解压后第一层为 `EFI/`，可直接复制到 U 盘的 EFI 分区。
 
 ## 适用硬件
 
